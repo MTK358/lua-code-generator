@@ -1,4 +1,3 @@
-
 Library to generate Lua code from a syntax tree. 
 
 Example language usage:
@@ -89,11 +88,11 @@ Break out of the innermost loop.
 
 Return the value `exp` from the current function. `sub` can be an `explist` node for multiple values.
 
-* `{'assign', lhs, rhs} (statement)
+* `{'assign', lhs, rhs}` (statement)
 
 Assignment operator. For multiple values on either side, use an `explist` node.
 
-* `{'local', lhs, rhs} (statement)
+* `{'local', lhs, rhs}` (statement)
 
 Create local variables. `lhs` is either a string or list of strings, and `rhs` is an optional value to assign to the variables (`explist` is allowed).
 
