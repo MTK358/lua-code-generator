@@ -2,11 +2,15 @@
 local codegen = require 'codegen'
 local exp_to_stat = require 'exp_to_stat'
 
+local pack = table.pack or function (...)
+	return {n=select('#', ...), ...}
+end
+
 local input_langs = {}
 
 local err_id = {}
 
-local function parse_lang_priv(parser, istream, srcname)
+local function parse_lang_priv(parser, istream, srcname, ...)
 	if type(istream)=='string' then
 		istream = istream:gmatch('.')
 	end
@@ -20,7 +24,7 @@ local function parse_lang_priv(parser, istream, srcname)
 		nextid = nextid + 1
 		return "___tmp_"..nextid
 	end
-	function ls.err(message, cont, line)
+	function ls.err(message, line, cont)
 		error {
 			err_id,
 			msg = message,
@@ -47,18 +51,19 @@ local function parse_lang_priv(parser, istream, srcname)
 		ls.c = c
 		return c
 	end
-	local success, result = pcall(parser.parse, ls)
+	local success, result = pcall(parser.parse, ls, ...)
 	if not success then
 		if type(result)~='table' or result[1]~=err_id then
 			error(result)
 		end
+		--print(srcname, result.line, result.msg)
 		return nil, ('%s:%s: %s'):format(srcname, result.line or '?', result.msg), result
 	end
 	return result
 end
 
-local function compile_lang_priv(parser, istream, srcname, ostream)
-	local ast, msg, err = parse_lang_priv(parser, istream, srcname)
+local function compile_lang_priv(parser, istream, srcname, ostream, ...)
+	local ast, msg, err = parse_lang_priv(parser, istream, srcname, ...)
 	if not ast then
 		return nil, msg, err
 	end
@@ -66,16 +71,17 @@ local function compile_lang_priv(parser, istream, srcname, ostream)
 	return true
 end
 
-local function load_lang_priv(parser, istream, srcname, env)
+local function load_lang_priv(parser, istream, srcname, env, ...)
 	local t, i = {}, 1
 	local function ostream(s)
 		t[i], i = s, i+1
 	end
-	local success, msg, err = compile_lang_priv(parser, istream, srcname, ostream)
+	local success, msg, err = compile_lang_priv(parser, istream, srcname, ostream, ...)
 	if not success then
 		return nil, msg, err
 	end
 	local src = table.concat(t)
+	--print(src)
 	if setfenv then
 		local chunk, errmsg = loadstring(src, srcname)
 		if not chunk then return nil, errmsg end
@@ -89,6 +95,41 @@ local function load_lang_priv(parser, istream, srcname, env)
 	end
 end
 
+local function repl_lang_priv(parser)
+	while true do
+		io.write('>>> ')
+		local line = io.read()..'\n'
+		local chunk, errstr, errtbl = load_lang_priv(parser, line, srcname, env, true)
+		while not chunk do
+			assert(errtbl, "lua failed to load generated code: "..errstr)
+			if errtbl.cont then
+				io.write('... ')
+				line = line..io.read()..'\n'
+				chunk, errstr, errtbl = load_lang_priv(parser, line, srcname, env, true)
+			else
+				io.write(errstr..'\n')
+				break
+			end
+		end
+		if chunk then
+			local result = pack(pcall(chunk))
+			if result[1] then
+				if result.n >= 2 then
+					for i = 2, result.n do
+						if i > 2 then
+							io.write'\t'
+						end
+						io.write(tostring(result[i]))
+					end
+					io.write'\n'
+				end
+			else
+				io.write(tostring(result[2])..'\n')
+			end
+		end
+	end
+end
+
 local function add_lang(parser)
 	local l = {
 		fullname = parser.fullname,
@@ -98,6 +139,7 @@ local function add_lang(parser)
 		parse = function (...) return parse_lang_priv(parser, ...) end,
 		compile = function (...) return compile_lang_priv(parser, ...) end,
 		load = function (...) return load_lang_priv(parser, ...) end,
+		repl = function (...) return repl_lang_priv(parser, ...) end,
 	}
 	input_langs[l.name] = l
 	return l

@@ -22,6 +22,9 @@ local keywords = {
 	['else'] = true,
 	['elseif'] = true,
 	['while'] = true,
+	['repeat'] = true,
+	['until'] = true,
+	['do'] = true,
 	['for'] = true,
 	['in'] = true,
 	['fn'] = true,
@@ -29,6 +32,13 @@ local keywords = {
 	['var'] = true,
 	['goto'] = true,
 	['return'] = true,
+	['and'] = true,
+	['or'] = true,
+	['not'] = true,
+
+	['function'] = true,
+	['then'] = true,
+	['local'] = true,
 }
 
 local string_backslash_escapes = {
@@ -61,7 +71,7 @@ local function nexttok(ls)
 				repeat
 					c = ls.getch()
 					if not c then
-						ls.err('unfinished double-quoted string', true)
+						ls.err('unfinished double-quoted string', ls.line, true)
 					end
 				until not c:match('[_%w]')
 				ls.tok = 'dqstr_var'
@@ -73,7 +83,7 @@ local function nexttok(ls)
 			ls.tok = 'dqstr_end'
 			return
 		elseif not c then
-			ls.err('unfinished double-quoted string', true)
+			ls.err('unfinished double-quoted string', ls.line, true)
 		else
 			while true do
 				if not c or c == '"' or c == '$' then
@@ -196,7 +206,7 @@ local function nexttok(ls)
 				c = ls.getch()
 			end
 			str = tostring(tonumber(str, 16))
-		elseif strmatch(c, '%d') then
+		elseif c and strmatch(c, '%d') then
 			repeat
 				str = str..c
 				c = ls.getch()
@@ -216,7 +226,7 @@ local function nexttok(ls)
 		repeat
 			str = str..c
 			c = ls.getch()
-		until not strmatch(c, '[_%w]')
+		until not (c and strmatch(c, '[_%w]'))
 		if keywords[str] then
 			ls.tok = str
 		else
@@ -236,7 +246,7 @@ local function nexttok(ls)
 					break
 				end
 			elseif not ls.c then
-				ls.err(true, 'unfinished single-quoted string')
+				ls.err('unfinished single-quoted string', ls.line, true)
 			else
 				str = str..ls.c
 			end
@@ -269,8 +279,10 @@ local expr_start_tokens = {
 	['for'] = true,
 	['var'] = true,
 	['not'] = true,
+	['do'] = true,
 	['goto'] = true,
 	['return'] = true,
+	['repeat'] = true,
 	['::'] = true,
 	["'"] = true,
 	['dqstr_start'] = true,
@@ -282,7 +294,7 @@ local expr_start_tokens = {
 
 local function expect(ls, tok)
 	if ls.tok ~= tok then
-		ls.err("expected token: "..tok)
+		ls.err("expected token: "..tok, ls.line, ls.tok==nil)
 	end
 	nexttok(ls)
 end
@@ -409,9 +421,13 @@ local function parse_block(ls)
 		nexttok(ls)
 		return parse_expr(ls)
 	elseif ls.tok == ';' then
+		local l = ls.line
 		nexttok(ls)
 		local e = parse_opt_stat_list(ls)
-		expect(ls, 'end')
+		if ls.tok ~= 'end' then
+			ls.err('expected "end" to match block on line '..l, ls.line, ls.tok==nil)
+		end
+		nexttok(ls)
 		return e
 	end
 	ls.err('expected ":", ";", or newline')
@@ -507,7 +523,10 @@ parse_start_expr = function(ls)
 	elseif t == "(" then
 		nexttok(ls)
 		local e = parse_opt_stat_list(ls)
-		expect(ls, ')')
+		if ls.tok ~= ')' then
+			ls.err('expected ")" to match "(" in line '..l, ls.line, ls.tok==nil)
+		end
+		nexttok(ls)
 		if e[1]=='seq' and not e[2] then
 			return {'nil'}
 		end
@@ -569,7 +588,7 @@ parse_start_expr = function(ls)
 	elseif t == "do" then
 		local l = ls.line
 		nexttok(ls)
-		local block = parse_block(ls)
+		local block = parse_opt_stat_list(ls)
 		expect(ls, "end")
 		return {line=l, "do", block}
 
@@ -584,7 +603,10 @@ parse_start_expr = function(ls)
 		local l = ls.line
 		nexttok(ls)
 		local block = parse_opt_stat_list(ls)
-		expect(ls, "until")
+		if ls.tok ~= 'until' then
+			ls.err('expected "until" to match "repeat" on line '..l, ls.line, ls.tok==nil)
+		end
+		nexttok(ls)
 		local cond = parse_exp(ls)
 		return {line=l, "repeat", block, cond}
 
@@ -615,7 +637,10 @@ parse_start_expr = function(ls)
 				nexttok(ls)
 				node[#node+1] = parse_opt_stat_list(ls)
 			end
-			expect(ls, 'end')
+			if ls.tok ~= 'end' then
+				ls.err('expected "end" to match "if" on line '..l, ls.line, ls.tok==nil)
+			end
+			nexttok(ls)
 			return node
 		end
 
@@ -784,7 +809,10 @@ parse_start_expr = function(ls)
 		if quotetype == 'dequote' then
 			node[3] = {'return', node[3]}
 		end
-		expect(ls, "]")
+		if ls.tok ~= ']' then
+			ls.err('expected "]" to match "[" in line '..l, ls.line, ls.tok==nil)
+		end
+		nexttok(ls)
 		return node
 
 	elseif t == "return" then
@@ -793,7 +821,7 @@ parse_start_expr = function(ls)
 
 	end
 
-	ls.err("expected expression")
+	ls.err("expected expression", ls.line, ls.tok==nil)
 end
 
 local function parse_atom_expr(ls)
@@ -937,14 +965,17 @@ parse_expr = function(ls)
 	return e
 end
 
-local function parse(ls)
+local function parse(ls, implicit_return)
 	ls.getch()
 	nexttok(ls)
 	local node = parse_stat_list(ls)
+	if implicit_return then
+		node = {'return', node}
+	end
 	if ls.tok then
 		ls.err('expected end of file')
 	end
-	ls.exp_to_stat(node)
+	node = ls.exp_to_stat(node, implicit_return)
 	return node
 end
 

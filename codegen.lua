@@ -4,6 +4,7 @@ local ipairs = ipairs
 local tostring = tostring
 local type = type
 local strfmt = string.format
+local tinsert, tremove = table.insert, table.remove
 
 local codegen_functions
 
@@ -185,28 +186,39 @@ codegen_functions = {
 
 	["seq"] = function (state, node, o)
 		for i = 2, #node do
-			if i ~= 2 and node[i][1]~='seq' then o";" end
+			--if i ~= 2 and node[i-1][1]~='seq' then o";" end
 			codegen(state, node[i], o)
+			if node[i][1]~='seq' then o";" end
 		end
 	end,
 
 	["nil"] = function (state, node, o)
+		o"("
 		o'nil'
+		o")"
 	end,
 
 	["true"] = function (state, node, o)
+		o"("
 		o'true'
+		o")"
 	end,
 	["false"] = function (state, node, o)
+		o"("
 		o'false'
+		o")"
 	end,
 
 	["number"] = function (state, node, o)
+		o"("
 		o(node[2])
+		o")"
 	end,
 
 	["string"] = function (state, node, o)
+		o"("
 		o(strfmt("%q", node[2]))
+		o")"
 	end,
 
 	["literal"] = function (state, node, o)
@@ -258,10 +270,16 @@ codegen_functions = {
 	end,
 
 	["quote"] = function (state, node, o)
-		local level = state.dequote_level + 1
-		state.dequote_level = level
+		tinsert(state.quote_stack, {
+			'quote',
+		})
 		local function quote_rec(node)
 			o"{"
+			if node[1] == 'table' then
+				o'hash='
+				quote_rec(node.hash)
+				o','
+			end
 			for i, v in ipairs(node) do
 				if i ~= 1 then
 					o","
@@ -282,7 +300,7 @@ codegen_functions = {
 			o"}"
 		end
 		quote_rec(node[2])
-		state.dequote_level = level - 1
+		tremove(state.quote_stack)
 	end,
 
 	["dequote"] = function (state, node, o)
@@ -313,18 +331,18 @@ codegen_functions = {
 			result = {'literal', result}
 		end
 		codegen(state, result, o)
-		state.dequote_level = level - 1
+		tremove(state.quote_stack)
 	end,
 }
+
+s=require'backup.serialize'.serialize
 
 return function (ast, ostream)
 	local state = {
 		safemode = false,
-		dequote_level = 0,
-		dequote_envs = {},
+		quote_stack = {},
 		line = 1,
 	}
 	codegen(state, ast, ostream)
-	ostream"\n"
 end
 

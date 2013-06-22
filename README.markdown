@@ -43,3 +43,180 @@ Example language usage:
 	var {thing:thing, tbl:{a, b}} = tbl
 	print thing, a, b
 
+==AST reference==
+
+Each node is a table with `[1]` containing the type of the node as a string, plus other info.
+
+Each node is also either a _statement_ or an _expression_. Many nodes only accept either one or the other as child node in certain cases.
+
+* `{'seq', ...}` (statement)
+
+A sequence of statements run in order.
+
+* `{'while', cond, body}` (statement)
+
+A `while` loop. `cond` is an expression, and `body` is a statement.
+
+* `{'repeat', body, cond}` (statement)
+
+A `repeat` loop. `cond` is an expression, and `body` is a statement.
+
+* `{'for_num', var, istart, iend, istep, body}` (statement)
+
+A numeric `for` loop. `var` is a string, `istart`, `iend`, and `istep` are expressions (but `istep` can be `false` to omit it), and `body` is a statement.
+
+* `{'for_iter', var_list, iter, body}` (statement)
+
+An iterator `for` loop. `var_list` is a list of strings, `iter` is the iterator (`explist` is allowed for multiple values), and `body` is a statement.
+
+* `{'do', body}` (statement)
+
+Creates a new scope for the `body` statement to run in.
+
+* `{'goto', label}` (statement)
+
+Jump to the label named by te `label` string. If this is used the resulting code will not be Lua 5.1 compatible.
+
+* `{'label', label}` (statement)
+
+Create a goto label named by the `label` string. If this is used the resulting code will not be Lua 5.1 compatible.
+
+* `{'break'}` (statement)
+
+Break out of the innermost loop.
+
+* `{'return', exp}` (statement)
+
+Return the value `exp` from the current function. `sub` can be an `explist` node for multiple values.
+
+* `{'assign', lhs, rhs} (statement)
+
+Assignment operator. For multiple values on either side, use an `explist` node.
+
+* `{'local', lhs, rhs} (statement)
+
+Create local variables. `lhs` is either a string or list of strings, and `rhs` is an optional value to assign to the variables (`explist` is allowed).
+
+* `{'if', cond, true_body, elseif_cond, elseif_body, else_body}` (statement)
+
+An `if` statement. The `else_body` is optional, and the `elseif_cond` and `elseif_body` can be repeated 0 or more times. The conditions are expected to be expressions, and the bodies should be statements.
+
+* `{'name', str}` (expression)
+
+A variable name.
+
+* `{'number', str}` (expression)
+
+A literal number. `str` is a string representation of the number, in a format that can be inserted directly into a Lua script file.
+
+* `{'string', str}` (expression)
+
+A literal string. `str` is the contents of the string.
+
+* `{'true'}` (expression)
+
+A boolean `true` value.
+
+* `{'false'}` (expression)
+
+A boolean `false` value.
+
+* `{'nil'}` (expression)
+
+A `nil` value.
+
+* `{'binop', op, lhs, rhs}` (expression)
+
+A binary operator expression. `op` is a string containing a valid Lua binary operator, and `lhs` and `rhs` are the sub-expressions.
+
+* `{'unop', op, sub}` (expression)
+
+A unary operator expression. `op` is a string containing a valid Lua unary operator, and `sub` is the sub-expression.
+
+* `{'gettable', tbl, key}` (expression)
+
+Get the value at `key` from `tbl`.
+
+* `{'call', fn, arg}` (any)
+
+Calls `fn` with `arg` as the argument. `arg` can be an `explist` node for multiple args.
+
+* `{'method_call', tbl, name, arg}` (any)
+
+Calls `tbl.name` with `tbl, arg` as the arguments. Translates to the `:` operator in Lua. Note that `name` is a string, not an expression that results in a string.
+
+* `{'table', hash={[key]=val}, ...}` (expression)
+
+A table constructor. Array entries are in `...`, and hash entries go in the `hash` subtable, where the keys and values are both expression nodes.
+
+* `{'function', {...}, body}` (expression)
+
+A function expression. `...` is a list of arg name string, `body` is the statement inside the function.
+
+* `{'vararg'}` (expression)
+
+Creates a `...` in the resulting code.
+
+* `{'explist', ...}` (expression, but only usable where a comma-separated list is acceptable in Lua)
+
+A comma-separated list of expressions. Often used as the arg expression for function calls, or the `return` statement.
+
+* `{'quote', node}` (expression)
+
+Put a table constructor that creates a table equivalent to `node` in the resulting code. Used to implement macros.
+
+* `{'dequote', node}` (any)
+
+Run the statement `node` during te code-generation process, and replace the `dequote` node with the node that it returns. Used to implement macros.
+
+==Converting expressions to statements==
+
+The `expr_to_stat` function takes an AST which ignores the distinction between statements and expressions, and changes it so that it represents a valid Lua program while retaining its original meaning.
+
+Some important nodes about how the conversion is done:
+
+`if` statements evaluate to the contents of the branch that was chosen, or `nil` of none of the branches match and there is no `else`:
+
+	f(if x then y else z end)
+
+	---
+
+	local tmp1
+	if x then
+		tmp1 = y
+	else
+		tmp1 = z
+	end
+	f(tmp1)
+
+Any loop evaluates to a list of the values returned on each iteration:
+
+	x = for i = 1, 10 do i end
+
+	---
+
+	local tmp1, tmp2 = 1, {}
+	for i = 1, 10 do
+		tmp2[tmp1] = i
+		tmp1 = tmp1 + 1
+	end
+	x = tmp2
+
+When an expression not usable as a statement in Lua doesn't have its result used, it's wrapped in a dummy statement:
+
+	a + b
+
+	---
+
+	if a + b then end
+
+Assignment (either with the `assign` or `local` node) results in the first variable's new value:
+
+	f(a = b)
+
+	---
+
+	local tmp1 = b
+	a = tmp1
+	f(tmp1)
+
