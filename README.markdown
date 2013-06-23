@@ -5,7 +5,7 @@ Example Language
 
 	# comment
 
-	# local localiables
+	# local variables
 	local a, b = 1, 2
 
 	# function calls have no ()
@@ -113,7 +113,7 @@ Creates a new scope for the `body` statement to run in.
 
 * `{'goto', label}` (statement)
 
-Jump to the label named by te `label` string. If this is used the resulting code will not be Lua 5.1 compatible.
+Jump to the label named by the `label` string. If this is used the resulting code will not be Lua 5.1 compatible.
 
 * `{'label', label}` (statement)
 
