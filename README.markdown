@@ -125,7 +125,7 @@ Break out of the innermost loop.
 
 * `{'return', exp}` (statement)
 
-Return the value `exp` from the current function. `sub` can be an `explist` node for multiple values.
+Return the value `exp` from the current function. `exp` can be an `explist` node for multiple values.
 
 * `{'assign', lhs, rhs}` (statement)
 
@@ -249,13 +249,13 @@ When an expression not usable as a statement in Lua doesn't have its result used
 
 	if a + b then end
 
-Assignment (either with the `assign` or `local` node) results in the first variable's new value:
+Assignment (either with the `assign` or `local` node) results in the varaible's new value, or a list of values if there are multiple variables:
 
-	f(a = b)
+	f(a, b = thing())
 
 	---
 
-	local tmp1 = b
-	a = tmp1
-	f(tmp1)
+	local tmp1, tmp2 = thing()
+	a, b = tmp1, tmp2
+	f(tmp1, tmp2)
 
