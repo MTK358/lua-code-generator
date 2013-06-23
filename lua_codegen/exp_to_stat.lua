@@ -1,75 +1,4 @@
 
--- Convert AST where everything can be used as an expression to a valid Lua
--- AST. For example:
---
--- if local match = str:match('%d') then
---     print('number', match)
--- elseif local match = str:match('%a') then
---     print('word', match)
--- end
---
--- is converted to:
---
--- local match = str:match('%d')
--- if match then
---     print('number', match)
--- else 
---     local match = str:match('%a')
---     if match then
---         print('word', match)
---     end
--- end
---
--- Similarly, this:
---
--- a = if cond then x else y end
---
--- becomes this:
---
--- local ?tmp
--- if cond then
---     ?tmp = x
--- else
---     ?tmp = y
--- end
--- a = ?tmp
---
--- where "?tmp" is an automatically generated temporary name.
---
--- Assignment works, too:
---
--- a = b = c
---
--- becomes:
---
--- local ?tmp = c
--- b = ?tmp
--- a = ?tmp
---
--- Not only are statements as expressions handled, but also expressions as
--- statements:
---
--- a + b -- causes an error in Lua when the result isn't used
---
--- becomes:
---
--- if a + b then end -- dummy statement to prevent the error
---
--- Also, when a loop is used as an expression:
---
--- list = for i = 1, 10 do i end
---
--- its results are stored into an array:
---
--- local ?t, ?i = {}, 1
--- for i = 1, 10 do
---     ?t[?i] = i
---     ?i = ?i + 1
--- end
--- list = ?t
---
--- (should this somehow be made customizable instead?)
-
 local nextid = 1
 
 local function tmpvarname()
@@ -81,7 +10,8 @@ end
 local exp2stat_funcs
 
 local function exp2stat(exp, node, parent, index, laststat_parent, laststat_index)
-	print(node[1])
+	--print(debug.traceback())
+	--print(node[1])
 	local f = exp2stat_funcs[node[1]]
 	f(exp, node, parent, index, laststat_parent, laststat_index)
 end
@@ -96,28 +26,11 @@ local stat_nodes = {
 	['seq'] = true,
 	['assign'] = true,
 	['local'] = true,
-	--['call'] = true,
-	--['method_call'] = true,
 }
 
-exp2stat_funcs = setmetatable({
+exp2stat_funcs = {
 	["seq"] = function (exp, node, parent, index, laststat_parent, laststat_index)
 		if exp then
-			--[[
-			local v = {'name', tmpvarname()}
-			laststat_parent[laststat_index] = {'seq',
-				{'local', v},
-				node,
-				laststat_parent[laststat_index],
-			}
-			local count = #node
-			for i = 2, count-1 do
-				exp2stat(false, node[i], node, i, node, i)
-			end
-			node[count] = {'assign', v, node[count]}
-			exp2stat(true, node[count][3], node[count], 3, node, count)
-			parent[index] = v
-			]]
 			laststat_parent[laststat_index] = {'seq',
 				node,
 				laststat_parent[laststat_index],
@@ -180,6 +93,7 @@ exp2stat_funcs = setmetatable({
 				node,
 				laststat_parent[laststat_index],
 			}
+			exp2stat(true, node[2], node, 2, laststat_parent, laststat_index)
 			for i = 3, #node do
 				node[i] = {'assign', v, node[i]}
 				exp2stat(true, node[i][3], node[i], 3, node, i)
@@ -197,14 +111,14 @@ exp2stat_funcs = setmetatable({
 			local vt = {'name', tmpvarname()}
 			local vi = {'name', tmpvarname()}
 			laststat_parent[laststat_index] = {'seq',
-				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'literal', 1}}},
+				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'number', 1}}},
 				node,
 				laststat_parent[laststat_index],
 			}
 			exp2stat(true, node[2], node, 2, laststat_parent, laststat_index)
 			node[3] = {'seq', 
 				{'assign', {'gettable', vt, vi}, node[3]},
-				{'assign', vi, {'binop', '+', vi, {'literal', 1}}},
+				{'assign', vi, {'binop', '+', vi, {'number', 1}}},
 			}
 			exp2stat(true, node[3][2][3], node[3][2], 3, node[3], 2)
 			parent[index] = vt
@@ -218,7 +132,7 @@ exp2stat_funcs = setmetatable({
 			local vt = {'name', tmpvarname()}
 			local vi = {'name', tmpvarname()}
 			laststat_parent[laststat_index] = {'seq',
-				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'literal', 1}}},
+				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'number', 1}}},
 				node,
 				laststat_parent[laststat_index],
 			}
@@ -229,7 +143,7 @@ exp2stat_funcs = setmetatable({
 			end
 			node[6] = {'seq', 
 				{'assign', {'gettable', vt, vi}, node[6]},
-				{'assign', vi, {'binop', '+', vi, {'literal', 1}}},
+				{'assign', vi, {'binop', '+', vi, {'number', 1}}},
 			}
 			exp2stat(true, node[6][2][3], node[6][2], 3, node[6], 2)
 			parent[index] = vt
@@ -247,19 +161,18 @@ exp2stat_funcs = setmetatable({
 			local vt = {'name', tmpvarname()}
 			local vi = {'name', tmpvarname()}
 			laststat_parent[laststat_index] = {'seq',
-				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'literal', 1}}},
+				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'number', 1}}},
 				node,
 				laststat_parent[laststat_index],
 			}
 			exp2stat(true, node[3], node, 3, laststat_parent, laststat_index)
 			node[4] = {'seq', 
 				{'assign', {'gettable', vt, vi}, node[4]},
-				{'assign', vi, {'binop', '+', vi, {'literal', 1}}},
+				{'assign', vi, {'binop', '+', vi, {'number', 1}}},
 			}
 			exp2stat(true, node[4][2][3], node[4][2], 3, node[4], 2)
 			parent[index] = vt
 		else
-			-- XXX
 			exp2stat(true, node[3], node, 3, parent, index)
 			exp2stat(false, node[4], node, 4, node, 4)
 		end
@@ -269,13 +182,13 @@ exp2stat_funcs = setmetatable({
 			local vt = {'name', tmpvarname()}
 			local vi = {'name', tmpvarname()}
 			laststat_parent[laststat_index] = {'seq',
-				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'literal', 1}}},
+				{'local', {'explist', vt, vi}, {'explist', {'table'}, {'number', 1}}},
 				node,
 				laststat_parent[laststat_index],
 			}
 			node[2] = {'seq', 
 				{'assign', {'gettable', vt, vi}, node[3]},
-				{'assign', vi, {'binop', '+', vi, {'literal', 1}}},
+				{'assign', vi, {'binop', '+', vi, {'number', 1}}},
 			}
 			exp2stat(true, node[2][2][3], node[2][2], 3, node[2], 2)
 			exp2stat(true, node[3], node, 3, laststat_parent, laststat_index)
@@ -290,21 +203,24 @@ exp2stat_funcs = setmetatable({
 			parent[index] = {"if", node, {"seq"}}
 		end
 	end,
-	["nil"] = function () end,
-	["true"] = function () end,
-	["false"] = function () end,
-	["number"] = function () end,
-	["string"] = function () end,
 	["assign"] = function (exp, node, parent, index, laststat_parent, laststat_index)
 		if exp then
-			local tmpvar = {'name', tmpvarname()}
+			local tmpvars = {'explist'}
+			if node[2][1] == 'explist' then
+				for i = 2, #node[2] do
+					tmpvars[i] = {'name', tmpvarname()}
+				end
+			else
+				tmpvars[2] = {'name', tmpvarname()}
+			end
+			local tmpvar_node = {'local', tmpvars, node[3]}
 			laststat_parent[laststat_index] = {'seq',
-				{'local', tmpvar, node[3]},
-				{'assign', node[2], tmpvar},
+				tmpvar_node,
+				{'assign', node[2], tmpvars},
 				laststat_parent[laststat_index],
 			}
-			parent[index] = tmpvar
-			exp2stat(true, node[3], node, 3, laststat_parent, laststat_index)
+			parent[index] = tmpvars
+			exp2stat(true, tmpvar_node[3], tmpvar_node, 3, laststat_parent, laststat_index)
 		else
 			exp2stat(true, node[3], node, 3, parent, index)
 		end
@@ -384,19 +300,56 @@ exp2stat_funcs = setmetatable({
 			parent[index] = {"if", node, {"seq"}}
 		end
 	end,
+	["gettable"] = function (exp, node, parent, index, laststat_parent, laststat_index)
+		if stat_nodes[node[2][1]] or stat_nodes[node[3][1]] then
+			local lhs = {'name', tmpvarname()}
+			local rhs = {'name', tmpvarname()}
+			local alhs = {'local', lhs, node[2]}
+			local arhs = {'local', rhs, node[3]}
+			node[3] = lhs
+			node[4] = rhs
+			laststat_parent[laststat_index] = {'seq',
+				alhs,
+				arhs,
+				laststat_parent[laststat_index],
+			}
+			exp2stat(true, alhs[3], alhs, 3, laststat_parent[laststat_index], 2)
+			exp2stat(true, arhs[3], arhs, 3, laststat_parent[laststat_index], 3)
+			--parent[index] = node
+		else
+			exp2stat(true, node[2], node, 2, laststat_parent, laststat_index)
+			exp2stat(true, node[3], node, 3, laststat_parent, laststat_index)
+		end
+		if not exp then
+			parent[index] = {"if", node, {"seq"}}
+		end
+	end,
 	["function"] = function (exp, node, parent, index, laststat_parent, laststat_index)
 		exp2stat(false, node[3], node, 3, node, 3)
 	end,
 	["return"] = function (exp, node, parent, index, laststat_parent, laststat_index)
 		if exp then
-			laststat_parent[laststat_index] = {'seq',
+			laststat_parent[laststat_index] = {'do', {'seq',
 				node,
 				laststat_parent[laststat_index],
-			}
+			}}
 			parent[index] = {'nil'}
 			exp2stat(true, node[2], node, 2, laststat_parent, laststat_index)
 		else
-			exp2stat(true, node[2], node, 2, parent, index)
+			parent[index] = {'do', node}
+			exp2stat(true, node[2], node, 2, parent[index], 2)
+		end
+	end,
+	["table"] = function (exp, node, parent, index, laststat_parent, laststat_index)
+		local lsp, lsi = laststat_parent, laststat_index
+		if not exp then
+			parent[index] = {"if", node, {"seq"}}
+		end
+		for i = 2, #node do
+			local n = node[i]
+			if n then
+				exp2stat(true, node[i], node, i, lsp, lsi)
+			end
 		end
 	end,
 	["explist"] = function (exp, node, parent, index, laststat_parent, laststat_index)
@@ -410,17 +363,14 @@ exp2stat_funcs = setmetatable({
 			end
 		end
 	end,
-}, {
-	__index = function () return function (exp, node, parent, index, laststat_parent, laststat_index)
-		for i = 2, #node do
-			exp2stat(true, node[i], node, i, laststat_parent, laststat_index)
-		end
-		if not exp then--and not stat_nodes[node[1]] then
-			-- exp used where a statement is expected is converted to: if <exp> then end
-			parent[index] = {"if", node, {"seq"}}
-		end
-	end end,
-})
+	["vararg"] = function () end,
+	["nil"] = function () end,
+	["true"] = function () end,
+	["false"] = function () end,
+	["number"] = function () end,
+	["string"] = function () end,
+	["literal"] = function () end,
+}
 
 local function exp_to_stat(node, implicit_return)
 	nextid = 1

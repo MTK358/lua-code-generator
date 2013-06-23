@@ -1,12 +1,6 @@
 
-local codegen = require 'codegen'
-local exp_to_stat = require 'exp_to_stat'
-
-local pack = table.pack or function (...)
-	return {n=select('#', ...), ...}
-end
-
-local input_langs = {}
+local codegen = require 'lua_codegen.codegen'
+local exp_to_stat = require 'lua_codegen.exp_to_stat'
 
 local err_id = {}
 
@@ -95,95 +89,17 @@ local function load_lang_priv(parser, istream, srcname, env, ...)
 	end
 end
 
-local function repl_lang_priv(parser)
-	while true do
-		io.write('>>> ')
-		local line = io.read()..'\n'
-		local chunk, errstr, errtbl = load_lang_priv(parser, line, srcname, env, true)
-		while not chunk do
-			assert(errtbl, "lua failed to load generated code: "..errstr)
-			if errtbl.cont then
-				io.write('... ')
-				line = line..io.read()..'\n'
-				chunk, errstr, errtbl = load_lang_priv(parser, line, srcname, env, true)
-			else
-				io.write(errstr..'\n')
-				break
-			end
-		end
-		if chunk then
-			local result = pack(pcall(chunk))
-			if result[1] then
-				if result.n >= 2 then
-					for i = 2, result.n do
-						if i > 2 then
-							io.write'\t'
-						end
-						io.write(tostring(result[i]))
-					end
-					io.write'\n'
-				end
-			else
-				io.write(tostring(result[2])..'\n')
-			end
-		end
-	end
-end
-
-local function add_lang(parser)
+local function new_lang(parser)
 	local l = {
 		fullname = parser.fullname,
 		name = parser.name,
-		filesuffix = parser.filesuffix,
-		parser = parser,
+		file_extensions = parser.file_extensions,
 		parse = function (...) return parse_lang_priv(parser, ...) end,
 		compile = function (...) return compile_lang_priv(parser, ...) end,
 		load = function (...) return load_lang_priv(parser, ...) end,
-		repl = function (...) return repl_lang_priv(parser, ...) end,
 	}
-	input_langs[l.name] = l
 	return l
 end
 
-local function get_lang(name)
-	return input_langs[name]
-end
-
-local function load_lang(lang, istream, srcname, env)
-	return input_langs[lang].load(istream, srcname, env)
-end
-
-local function loadfile_lang(file, srcname, env, lang)
-	if not lang then
-		local suffix = file:match('%.([%w]+)$')
-		if not suffix then
-			return nil, 'cannot get language type by file suffix'
-		end
-		for k, v in pairs(input_langs) do
-			if suffix == v.filesuffix then
-				lang = v
-				break
-			end
-		end
-		if not lang then
-			return nil, 'cannot get language type by file suffix'
-		end
-	else
-		lang = input_langs[lang]
-	end
-	local f = io.open(file)
-	local function istream()
-		return f:read(1)
-	end
-	local chunk, err, errtbl lang.load(istream, srcname, env)
-	f:close()
-	return chunk, err, errtbl
-end
-
-return {
-	add_lang = add_lang,
-	get_lang = get_lang,
-	load = load_lang,
-	loadfile = loadfile_lang,
-}
+return new_lang
 

@@ -1,17 +1,18 @@
 Library to generate Lua code from a syntax tree. 
 
-Example language usage:
+Example Language
+----------------
 
 	# comment
 
-	# local variables
-	var a, b = 1, 2
+	# local localiables
+	local a, b = 1, 2
 
 	# function calls have no ()
 	print a, "example", b
 
 	# ! is a call with no args
-	var input = tonumber io.read!
+	local input = tonumber io.read!
 
 	# everything is an expression
 	print if input>5: "greater than 5" else "less than or equal to 5"
@@ -28,21 +29,59 @@ Example language usage:
 	print "$a + $b = $(a + b)"
 
 	# loops evaluate to a list
-	var list = for i = 1, 5: i
+	local list = for i = 1, 5: i
 	for k, v in ipairs list: print k, v
 
-	# table constructors use : instead of = , and don't need commas after newlines
-	var tbl = {
+	# table constructors don't need commas before newlines
+	local tbl = {
+		# key->value syntax
+		456 -> "asdf"
+		# sugar for literal strings
 		thing: 123
-		[456]: "asdf"
 		tbl: {'a', 'b'}
 	}
 
 	# table deconstruction
-	var {thing:thing, tbl:{a, b}} = tbl
+	local {thing:thing, tbl:{a, b}} = tbl
 	print thing, a, b
 
-==AST reference==
+	# "in" syntax sugar for multiple comparisons with the same value
+	print 'bar' in ('foo', 'bar')
+	print 5 in (4, 7)
+	print 4 in (4, 7)
+	print 4 in (4<=>7) # range (inclusive)
+	print 4 in (4<>7) # range (exclusive)
+	print 4 in (4<=->7) # range (includes only lower limit)
+	print 4 in (4<-=>7) # range (includes only upper limit)
+	print 50 in (4<=>7, 10<=>20, 50) # ranges and choices can be combined
+	print 'bar' in ('a'<=>'c') # ranges work with any comparable values
+
+	local cls = {}
+	cls.__index = cls
+
+	cls.new = fn val
+		local self = {v: val}
+		return self
+	end
+
+	# @ is short for self.
+	cls.foo = fn self, n
+		return @v + n
+	end
+
+	# calling an @name automatically uses self as the first arg
+	cls.bar = fn self
+		@v = @foo 5
+	end
+
+	# \ is a method call
+	local i = cls.new 3
+	print cls\foo 3
+	cls\bar!
+	print cls\foo 3
+
+AST reference
+-------------
 
 Each node is a table with `[1]` containing the type of the node as a string, plus other info.
 
@@ -94,7 +133,7 @@ Assignment operator. For multiple values on either side, use an `explist` node.
 
 * `{'local', lhs, rhs}` (statement)
 
-Create local variables. `lhs` is either a string or list of strings, and `rhs` is an optional value to assign to the variables (`explist` is allowed).
+Create local variables. `lhs` is either a `name` node or `explist` of `name` nodes, and `rhs` is an optional value to assign to the variables (`explist` is allowed).
 
 * `{'if', cond, true_body, elseif_cond, elseif_body, else_body}` (statement)
 
@@ -144,9 +183,9 @@ Calls `fn` with `arg` as the argument. `arg` can be an `explist` node for multip
 
 Calls `tbl.name` with `tbl, arg` as the arguments. Translates to the `:` operator in Lua. Note that `name` is a string, not an expression that results in a string.
 
-* `{'table', hash={[key]=val}, ...}` (expression)
+* `{'table', key1, val1, key2, val2, ...}` (expression)
 
-A table constructor. Array entries are in `...`, and hash entries go in the `hash` subtable, where the keys and values are both expression nodes.
+A table constructor. For array items, the key can be `false`.
 
 * `{'function', {...}, body}` (expression)
 
@@ -168,7 +207,8 @@ Put a table constructor that creates a table equivalent to `node` in the resulti
 
 Run the statement `node` during te code-generation process, and replace the `dequote` node with the node that it returns. Used to implement macros.
 
-==Converting expressions to statements==
+Converting expressions to statements
+------------------------------------
 
 The `expr_to_stat` function takes an AST which ignores the distinction between statements and expressions, and changes it so that it represents a valid Lua program while retaining its original meaning.
 

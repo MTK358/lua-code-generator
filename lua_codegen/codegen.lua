@@ -239,18 +239,13 @@ codegen_functions = {
 
 	["table"] = function (state, node, o)
 		o"({"
-		local hash = node.hash
-		if hash then
-			for k, v in pairs(hash) do
+		for i = 2, #node, 2 do
+			if node[i] then
 				o"["
-				codegen(state, k, o)
+				codegen(state, node[i], o)
 				o"]="
-				codegen(state, v, o)
-				o","
 			end
-		end
-		for i = 2, #node do
-			codegen(state, node[i], o)
+			codegen(state, node[i+1], o)
 			o","
 		end
 		o"})"
@@ -267,6 +262,10 @@ codegen_functions = {
 
 	["name"] = function (state, node, o)
 		o(node[2])
+	end,
+
+	["vararg"] = function (state, node, o)
+		o'...'
 	end,
 
 	["quote"] = function (state, node, o)
@@ -334,8 +333,6 @@ codegen_functions = {
 		tremove(state.quote_stack)
 	end,
 }
-
-s=require'backup.serialize'.serialize
 
 return function (ast, ostream)
 	local state = {

@@ -1,4 +1,6 @@
 
+local new_lang = require 'lua_codegen.new_lang'
+
 local tonumber = tonumber
 local strmatch = string.match
 local strchar = string.char
@@ -8,12 +10,12 @@ local tinsert = table.insert
 local one_char_tokens = {
 	['(']=true, [')']=true, ['[']=true, [']']=true,
 	['{']=true, ['}']=true, ['~']=true, ['@']=true,
-	[',']=true, ['\\']=true,
+	[',']=true, ['\\']=true, ['?']=true,
 }
 
 local optional_eq_tokens = {
-	['+']=true, ['-']=true, ['*']=true, ['/']=true,
-	['%']=true, ['^']=true, ['>']=true, ['<']=true,
+	['+']=true, ['*']=true, ['/']=true,
+	['%']=true, ['^']=true, ['>']=true, ['#']=true,
 	['!']=true, ['=']=true,
 }
 
@@ -29,7 +31,7 @@ local keywords = {
 	['in'] = true,
 	['fn'] = true,
 	['end'] = true,
-	['var'] = true,
+	['local'] = true,
 	['goto'] = true,
 	['return'] = true,
 	['and'] = true,
@@ -38,7 +40,6 @@ local keywords = {
 
 	['function'] = true,
 	['then'] = true,
-	['local'] = true,
 }
 
 local string_backslash_escapes = {
@@ -192,6 +193,53 @@ local function nexttok(ls)
 			ls.tok = ':'
 		end
 
+	elseif c=='-' then
+		c = ls.getch()
+		if c=='>' then
+			ls.getch()
+			ls.tok = '->'
+		else
+			ls.tok = '-'
+		end
+
+	elseif c=='<' then
+		c = ls.getch()
+		if c=='=' then
+			c = ls.getch()
+			if c=='>' then
+				ls.getch()
+				ls.tok = '<=>'
+			elseif c=='-' then
+				c = ls.getch()
+				if c == '>' then
+					ls.getch()
+					ls.tok = '<=->'
+				else
+					ls.err('invalid token')
+				end
+			else
+				ls.tok = '<='
+			end
+		elseif c=='-' then
+			c = ls.getch()
+			if c == '=' then
+				c = ls.getch()
+				if c == '>' then
+					ls.getch()
+					ls.tok = '<-=>'
+				else
+					ls.err('invalid token')
+				end
+			else
+				ls.tok = '<-'
+			end
+		elseif c=='>' then
+			ls.getch()
+			ls.tok = '<>'
+		else
+			ls.tok = '<'
+		end
+
 	elseif c=='\n' or c==';' then
 		ls.getch()
 		ls.tok = ';'
@@ -277,7 +325,7 @@ local expr_start_tokens = {
 	['if'] = true,
 	['while'] = true,
 	['for'] = true,
-	['var'] = true,
+	['local'] = true,
 	['not'] = true,
 	['do'] = true,
 	['goto'] = true,
@@ -290,6 +338,7 @@ local expr_start_tokens = {
 	['['] = true,
 	['{'] = true,
 	['~'] = true,
+	['@'] = true,
 }
 
 local function expect(ls, tok)
@@ -434,19 +483,16 @@ local function parse_block(ls)
 end
 
 local function tbl_node_iter(node)
-	local nextkey, array, i = nil, true, 1
+	local i, nextarrkey = 2, 1
 	return function ()
-		if array then
-			i = i + 1
-			if node[i] then
-				return {'number', tostring(i-1)}, node[i]
-			end
+		local k, v = node[i], node[i+1]
+		if not v then return end
+		i = i + 2
+		if not k then
+			k = {'number', tostring(nextarrkey)}
+			nextarrkey = nextarrkey + 1
 		end
-		local k, v = next(node.hash, nextkey)
-		if k then
-			nextkey = k
-			return k, v
-		end
+		return k, v
 	end
 end
 
@@ -552,7 +598,7 @@ parse_start_expr = function(ls)
 		nexttok(ls)
 		return {line=l, "break"}
 
-	elseif t == "var" then
+	elseif t == "local" then
 		local ln = ls.line
 		nexttok(ls)
 		local l, has_tbl = parse_var_list(ls)
@@ -706,7 +752,7 @@ parse_start_expr = function(ls)
 		while ls.tok==';' or ls.tok==',' do
 			nexttok(ls)
 		end
-		local node = {line=l, "table", hash={}}
+		local node = {line=l, "table"}
 		local first = true
 		while true do
 			if first then
@@ -724,6 +770,7 @@ parse_start_expr = function(ls)
 			if ls.tok == "}" then
 				nexttok(ls)
 				break
+				--[[
 			elseif ls.tok == "[" then
 				nexttok(ls)
 				local key = parse_expr(ls)
@@ -731,14 +778,22 @@ parse_start_expr = function(ls)
 				expect(ls, ":")
 				local val = parse_expr(ls)
 				node.hash[key] = val
+				]]
 			else
 				local key = parse_expr(ls)
 				if key[1] == "name" and ls.tok == ':' then
 					nexttok(ls)
 					local val = parse_expr(ls)
 					key[1] = "string"
-					node.hash[key] = val
+					node[#node+1] = key
+					node[#node+1] = val
+				elseif ls.tok == '->' then
+					nexttok(ls)
+					local val = parse_expr(ls)
+					node[#node+1] = key
+					node[#node+1] = val
 				else
+					node[#node+1] = false
 					node[#node+1] = key
 				end
 			end
@@ -824,6 +879,12 @@ parse_start_expr = function(ls)
 	ls.err("expected expression", ls.line, ls.tok==nil)
 end
 
+local cmp_op_tokens = {
+	['=='] = true, ['!='] = true,
+	['>'] = true, ['<'] = true,
+	['>='] = true, ['<='] = true,
+}
+
 local function parse_atom_expr(ls)
 	if ls.tok == '~' then
 		nexttok(ls)
@@ -838,9 +899,18 @@ local function parse_atom_expr(ls)
 
 		elseif ls.tok == "." then
 			nexttok(ls)
-			local name = ls.tokval
-			expect(ls, "name")
-			e = {line=e.line, "gettable", e, {'string', name}}
+			if ls.tok == '?' then
+				nexttok(ls)
+				local name = ls.tokval
+				expect(ls, "name")
+				local tmpname = {'name', ls.new_tmp_var()}
+				e = {line=e.line, "if", {'binop', '~=', {'local', tmpname, e}, {'nil'}},
+				                        {"gettable", tmpname, {'string', name}}}
+			else
+				local name = ls.tokval
+				expect(ls, "name")
+				e = {line=e.line, "gettable", e, {'string', name}}
+			end
 
 		elseif ls.tok == "\\" then
 			nexttok(ls)
@@ -849,15 +919,81 @@ local function parse_atom_expr(ls)
 			if ls.tok == '!' then
 				nexttok(ls)
 				e = {line=e.line, "method_call", e, name, {'explist'}}
-			else
+			elseif expr_start_tokens[ls.tok] then
 				e = {line=e.line, "method_call", e, name, parse_expr_list(ls)}
+			else
+				local tmpname = {'name', ls.new_tmp_var()}
+				e = {line=e.line, 'do', {'seq',
+					{'local', tmpname, e},
+					{'function', {'...'}, {'return',
+						{'method_call', tmpname, name, {'vararg'}},
+					}},
+				}}
 			end
 
 		elseif ls.tok == "[" then
 			nexttok(ls)
-			local key = parse_expr(ls)
-			expect(ls, "]")
-			e = {line=e.line, "gettable", e, key}
+			if ls.tok == '?' then
+				nexttok(ls)
+				local key = parse_expr(ls)
+				expect(ls, "]")
+				local tmpname = {'name', ls.new_tmp_var()}
+				e = {line=e.line, "if", {'binop', '~=', {'local', tmpname, e}, {'nil'}},
+				                        {"gettable", tmpname, key}}
+			else
+				local key = parse_expr(ls)
+				expect(ls, "]")
+				e = {line=e.line, "gettable", e, key}
+			end
+
+		elseif ls.tok == "in" then
+			local l = ls.line
+			nexttok(ls)
+			if not ls.tok == '(' then
+				ls.err('expected "(" after "in"')
+			end
+			nexttok(ls)
+			local cmp
+			local tmpname = {'name', ls.new_tmp_var()}
+			while true do
+				local choice = parse_expr(ls)
+				if ls.tok == '<>' then
+					nexttok(ls)
+					choice = {'binop', 'and',
+						{'binop', '>', tmpname, choice},
+						{'binop', '<', tmpname, parse_expr(ls)},
+					}
+				elseif ls.tok == '<=>' then
+					nexttok(ls)
+					choice = {'binop', 'and',
+						{'binop', '>=', tmpname, choice},
+						{'binop', '<=', tmpname, parse_expr(ls)},
+					}
+				elseif ls.tok == '<=->' then
+					nexttok(ls)
+					choice = {'binop', 'and',
+						{'binop', '>=', tmpname, choice},
+						{'binop', '<', tmpname, parse_expr(ls)},
+					}
+				elseif ls.tok == '<-=>' then
+					nexttok(ls)
+					choice = {'binop', 'and',
+						{'binop', '>', tmpname, choice},
+						{'binop', '<=', tmpname, parse_expr(ls)},
+					}
+				else
+					choice = {'binop', '==', tmpname, choice}
+				end
+				cmp = cmp and {'binop', 'or', cmp, choice} or choice
+				if ls.tok == ',' then
+					nexttok(ls)
+					while ls.tok == ';' do nexttok(ls) end
+				else
+					break
+				end
+			end
+			expect(ls, ')')
+			e = {line=l, 'do', {'seq', {'local', tmpname, e}, cmp}}
 
 		elseif expr_start_tokens[ls.tok] then
 			e = {line=e.line, "call", e, parse_expr_list(ls)}
@@ -893,7 +1029,7 @@ local function parse_binop_expr(ls, min_prec)
 	while true do
 		local optok = ls.tok
 		local op = ops[optok]
-		if not op then break end
+		if not op or op[1]<min_prec then break end
 		nexttok(ls)
 		while ls.tok == ';' do
 			nexttok(ls)
@@ -918,9 +1054,9 @@ parse_expr = function(ls)
 	local e
 	if ls.tok == "not" then
 		nexttok(ls)
-		e = {"unop", "not", parse_binop_expr(ls)}
+		e = {"unop", "not", parse_binop_expr(ls, 0)}
 	else
-		e = parse_binop_expr(ls)
+		e = parse_binop_expr(ls, 0)
 	end
 
 	while true do
@@ -979,10 +1115,10 @@ local function parse(ls, implicit_return)
 	return node
 end
 
-return {
+return new_lang {
 	fullname = "mylang",
 	name = "mylang",
-	filesuffix = "mylang",
+	file_extensions = {"mylang"},
 	parse = parse,
 }
 
