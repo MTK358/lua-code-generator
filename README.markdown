@@ -212,7 +212,7 @@ Converting expressions to statements
 
 The `expr_to_stat` function takes an AST which ignores the distinction between statements and expressions, and changes it so that it represents a valid Lua program while retaining its original meaning.
 
-Some important nodes about how the conversion is done:
+Some important notes about how the conversion is done:
 
 `if` statements evaluate to the contents of the branch that was chosen, or `nil` of none of the branches match and there is no `else`:
 
@@ -251,7 +251,7 @@ When an expression not usable as a statement in Lua doesn't have its result used
 
 Assignment (either with the `assign` or `local` node) results in the varaible's new value, or a list of values if there are multiple variables:
 
-	f(a, b = thing())
+	f((a, b) = thing())
 
 	---
 
